@@ -1,17 +1,12 @@
 use clap::Parser;
 use log::{error, info};
-use sysinfo::{Disks, System, Networks};
+use sysinfo::{Disks, Networks, System};
 
 mod logging;
 mod metrics;
 mod signal;
 
-const VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    " (",
-    env!("RWATCH_COMMIT"),
-    ")"
-);
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("RWATCH_COMMIT"), ")");
 
 #[derive(Parser)]
 #[command(
@@ -37,15 +32,12 @@ fn main() {
         }
     };
 
-    const NTP_SERVERS: [&str; 2] = [
-        "169.254.169.254:123",
-        "ntp.nict.jp:123",
-    ];
+    const NTP_SERVERS: [&str; 2] = ["169.254.169.254:123", "ntp.nict.jp:123"];
 
     let mut sys = System::new();
     let mut disks = Disks::new_with_refreshed_list();
     let mut network = Networks::new_with_refreshed_list();
-
+    let mut network_metrics = metrics::network::NetworkMetrics::new(&network);
 
     let ntp_time = match metrics::time::NtpClock::new(&NTP_SERVERS) {
         Some(ntp_time) => ntp_time,
@@ -59,40 +51,26 @@ fn main() {
 
     loop {
         let cpu_usage: f64 = metrics::cpu::get_cpu_usage(&mut sys);
-        let available_memory_percentage =
-            metrics::memory::get_memory_usage(&mut sys);
-        let disk_usage =
-            metrics::disk::get_disk_usage(&mut disks);
-       
+        let available_memory_percentage = metrics::memory::get_memory_usage(&mut sys);
+        let disk_usage = metrics::disk::get_disk_usage(&mut disks);
+
         network.refresh(true);
+        let network_mbps = network_metrics.get_mbps(&network);
+        let network_display = metrics::network::format_network_mbps(network_mbps);
 
-        let network_usage =
-            metrics::network::get_network_usage(&network);
-
-        let timestamp = ntp_time
-            .now()
-            .format("%Y-%m-%d %H:%M:%S%.3f")
-            .to_string();
+        let timestamp = ntp_time.now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
         info!(
-            "[{}] CPU: {:.2}%, Memory available: {:.2}%, Disk: {:.2}% Networks: {} bytes",
-            timestamp,
-            cpu_usage,
-            available_memory_percentage,
-            disk_usage,
-            network_usage
+            "[{}] CPU: {:.2}%, Memory available: {:.2}%, Disk: {:.2}% Network: {} ",
+            timestamp, cpu_usage, available_memory_percentage, disk_usage, network_display
         );
 
-       let record = format!(
-         "{{\"timestamp\": \"{}\", \"cpu_usage\": {:.2}, \
+        let record = format!(
+            "{{\"timestamp\": \"{}\", \"cpu_usage\": {:.2}, \
             \"available_memory_percentage\": {:.2}, \
              \"disk_usage\": {:.2}, \
-            \"network_usage\": {} }}",
-            timestamp,
-            cpu_usage,
-            available_memory_percentage,
-            disk_usage,
-           network_usage,
+            \"network_mbps\": {:.6} }}",
+            timestamp, cpu_usage, available_memory_percentage, disk_usage, network_mbps,
         );
 
         if let Err(error) = server_logger.append(&record) {
@@ -107,12 +85,8 @@ fn main() {
         let mut shutdown_requested = lock.lock().unwrap();
 
         if !*shutdown_requested {
-            let (guard, _) = cvar
-                .wait_timeout(
-                    shutdown_requested,
-                    std::time::Duration::from_secs(5),
-                )
-                .unwrap();
+            let (guard, _) =
+                cvar.wait_timeout(shutdown_requested, std::time::Duration::from_secs(5)).unwrap();
 
             shutdown_requested = guard;
         }
