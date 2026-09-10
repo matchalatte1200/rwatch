@@ -64,8 +64,10 @@ fn main() {
         let disk_usage =
             metrics::disk::get_disk_usage(&mut disks);
        
+        network.refresh(true);
+
         let network_usage =
-            metrics::network::get_network_usage(&mut  network);
+            metrics::network::get_network_usage(&network);
 
         let timestamp = ntp_time
             .now()
