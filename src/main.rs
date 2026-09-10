@@ -1,6 +1,6 @@
 use clap::Parser;
 use log::{error, info};
-use sysinfo::{Disks, System};
+use sysinfo::{Disks, System, Networks};
 
 mod logging;
 mod metrics;
@@ -44,6 +44,8 @@ fn main() {
 
     let mut sys = System::new();
     let mut disks = Disks::new_with_refreshed_list();
+    let mut network = Networks::new_with_refreshed_list();
+
 
     let ntp_time = match metrics::time::NtpClock::new(&NTP_SERVERS) {
         Some(ntp_time) => ntp_time,
@@ -61,6 +63,9 @@ fn main() {
             metrics::memory::get_memory_usage(&mut sys);
         let disk_usage =
             metrics::disk::get_disk_usage(&mut disks);
+       
+        let network_usage =
+            metrics::network::get_network_usage(&mut  network);
 
         let timestamp = ntp_time
             .now()
@@ -68,21 +73,24 @@ fn main() {
             .to_string();
 
         info!(
-            "[{}] CPU: {:.2}%, Memory available: {:.2}%, Disk: {:.2}%",
-            timestamp,
-            cpu_usage,
-            available_memory_percentage,
-            disk_usage
-        );
-
-        let record = format!(
-            "{{\"timestamp\": \"{}\", \"cpu_usage\": {:.2}, \
-            \"available_memory_percentage\": {:.2}, \
-            \"disk_usage\": {:.2}}}",
+            "[{}] CPU: {:.2}%, Memory available: {:.2}%, Disk: {:.2}% Networks: {} bytes",
             timestamp,
             cpu_usage,
             available_memory_percentage,
             disk_usage,
+            network_usage
+        );
+
+       let record = format!(
+         "{{\"timestamp\": \"{}\", \"cpu_usage\": {:.2}, \
+            \"available_memory_percentage\": {:.2}, \
+             \"disk_usage\": {:.2}, \
+            \"network_usage\": {} }}",
+            timestamp,
+            cpu_usage,
+            available_memory_percentage,
+            disk_usage,
+           network_usage,
         );
 
         if let Err(error) = server_logger.append(&record) {
